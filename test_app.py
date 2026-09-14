@@ -4,15 +4,30 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import tempfile
 import threading
+import struct
 import unittest
 
 from PIL import Image
-from app import (Document, ScrollFrameCollector, cloud_target_url, image_difference,
+from app import (Document, MjpegAviWriter, ScrollFrameCollector, cloud_target_url, image_difference,
                  load_settings, multipart_body, protect_secret, render, save_settings,
                  stitch_scroll_frames, text_card, unprotect_secret, upload_png)
 
 
 class DocumentTests(unittest.TestCase):
+    def test_mjpeg_avi_writer_builds_indexed_video(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "recording.avi"
+            with MjpegAviWriter(target, (160, 90), fps=10, quality=70) as writer:
+                for color in ("#ff0000", "#00ff00", "#0000ff"):
+                    writer.write(Image.new("RGB", (160, 90), color))
+            payload = target.read_bytes()
+            self.assertEqual(payload[:4], b"RIFF")
+            self.assertEqual(payload[8:12], b"AVI ")
+            self.assertIn(b"MJPG", payload)
+            self.assertIn(b"idx1", payload)
+            avih = payload.index(b"avih") + 8
+            self.assertEqual(struct.unpack_from("<I", payload, avih + 16)[0], 3)
+
     def test_cloud_secret_is_protected_and_roundtrips(self):
         protected = protect_secret("cloud-token-测试")
         self.assertNotIn("cloud-token", protected)

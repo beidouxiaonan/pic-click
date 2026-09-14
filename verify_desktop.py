@@ -50,11 +50,15 @@ def select():
                     if isinstance(widget, tk.Button) and "完成" in widget.cget("text"))
     assert any(isinstance(widget, tk.Button) and "滚动截图" in widget.cget("text")
                for widget in descendants(overlay)), "capture Dock must expose scrolling capture"
+    assert any(isinstance(widget, tk.Button) and "录制" in widget.cget("text")
+               for widget in descendants(overlay)), "capture Dock must expose video recording"
     complete.invoke()
     root.update()
     assert len(app.pins) == 1
     pin = app.pins[0]
-    assert any(getattr(child, "cget", lambda key: "")("text") == "保存设置" for child in pin.actions.winfo_children())
+    dock_symbols = {getattr(child, "cget", lambda key: "")("text") for child in pin.actions.winfo_children()}
+    assert "▣" in dock_symbols, "single Dock must expose copy"
+    assert "▤" in dock_symbols, "single Dock must expose pin-to-desktop"
     assert pin.doc.base.size == (400, 200)
     assert not app.capturing and not pin.compact
     assert not overlay.winfo_exists(), "selection overlay must close after mouse release"

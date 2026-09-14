@@ -13,9 +13,11 @@ import os
 from pathlib import Path
 import re
 import shutil
+import struct
 import sys
 import threading
 import textwrap
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -28,6 +30,164 @@ from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageGrab, ImageStat, I
 VENDOR_DIR = Path(__file__).resolve().parent / ".vendor"
 if VENDOR_DIR.exists() and str(VENDOR_DIR) not in sys.path:
     sys.path.insert(0, str(VENDOR_DIR))
+
+
+UI = {
+    "bg": "#F4F6FA",
+    "surface": "#FFFFFF",
+    "surface_muted": "#EEF1F6",
+    "border": "#DDE2EA",
+    "text": "#172033",
+    "muted": "#667085",
+    "primary": "#4F46E5",
+    "primary_hover": "#4338CA",
+    "primary_pressed": "#3730A3",
+    "accent": "#0EA5E9",
+    "success": "#159A67",
+    "danger": "#D92D20",
+    "editor": "#151A2D",
+    "editor_hover": "#262D45",
+    "canvas": "#202533",
+}
+
+TOOLBAR_CATALOG = (
+    ("move", "移动标注", "↖", "tool"),
+    ("rectangle", "矩形", "□", "tool"),
+    ("ellipse", "椭圆", "○", "tool"),
+    ("arrow", "箭头", "↗", "tool"),
+    ("brush", "画笔", "✎", "tool"),
+    ("highlight", "高亮", "▰", "tool"),
+    ("mosaic", "马赛克", "▦", "tool"),
+    ("number", "序号", "①", "tool"),
+    ("text", "文字", "T", "tool"),
+    ("style", "颜色与样式", "●", "style"),
+    ("undo", "撤销", "↶", "action"),
+    ("redo", "重做", "↷", "action"),
+    ("save", "保存 PNG", "⇩", "action"),
+    ("upload", "上传云端", "☁", "action"),
+    ("copy", "复制", "▣", "primary"),
+    ("pin", "贴到桌面", "▤", "action"),
+)
+DEFAULT_TOOLBAR_ORDER = [item[0] for item in TOOLBAR_CATALOG]
+TOOLBAR_BY_ID = {item[0]: item for item in TOOLBAR_CATALOG}
+TOOL_VALUES = {
+    "move": "移动", "rectangle": "矩形", "ellipse": "椭圆", "arrow": "箭头",
+    "brush": "画笔", "highlight": "高亮", "mosaic": "马赛克", "number": "序号", "text": "文字",
+}
+
+
+def ui_font(size=10, weight="normal"):
+    return ("Microsoft YaHei UI", size, weight)
+
+
+def attach_tooltip(widget, text):
+    """Add a small delayed label so an icon-only Dock remains discoverable."""
+    state = {"after": None, "window": None}
+
+    def hide(event=None):
+        if state["after"]:
+            widget.after_cancel(state["after"])
+            state["after"] = None
+        if state["window"]:
+            state["window"].destroy()
+            state["window"] = None
+
+    def show():
+        state["after"] = None
+        tip = state["window"] = tk.Toplevel(widget)
+        tip.overrideredirect(True)
+        tip.attributes("-topmost", True)
+        tk.Label(tip, text=text, bg="#0B1020", fg="#FFFFFF", padx=8, pady=5,
+                 font=ui_font(9)).pack()
+        tip.geometry(f"+{widget.winfo_rootx()}+{widget.winfo_rooty()-36}")
+
+    widget.bind("<Enter>", lambda event: state.update(after=widget.after(420, show)), add="+")
+    widget.bind("<Leave>", hide, add="+")
+    widget.bind("<ButtonPress>", hide, add="+")
+
+
+def configure_ui(root):
+    """Apply a restrained Windows-style theme shared by every application window."""
+    root.configure(bg=UI["bg"])
+    style = ttk.Style(root)
+    if "clam" in style.theme_names():
+        style.theme_use("clam")
+    style.configure("TFrame", background=UI["bg"])
+    style.configure("Surface.TFrame", background=UI["surface"])
+    style.configure("Editor.TFrame", background=UI["editor"])
+    style.configure("TLabel", background=UI["bg"], foreground=UI["text"], font=ui_font())
+    style.configure("Surface.TLabel", background=UI["surface"], foreground=UI["text"])
+    style.configure("Muted.TLabel", background=UI["bg"], foreground=UI["muted"], font=ui_font(9))
+    style.configure("Editor.TLabel", background=UI["editor"], foreground="#E6E9F2", font=ui_font(9))
+    style.configure("TButton", background=UI["surface"], foreground=UI["text"],
+                    bordercolor=UI["border"], lightcolor=UI["surface"], darkcolor=UI["surface"],
+                    font=ui_font(10), padding=(13, 8), relief="flat")
+    style.map("TButton", background=[("pressed", UI["surface_muted"]), ("active", "#F8F9FC")],
+              bordercolor=[("focus", UI["primary"]), ("active", "#C7CFDC")])
+    style.configure("Primary.TButton", background=UI["primary"], foreground="#FFFFFF",
+                    bordercolor=UI["primary"], lightcolor=UI["primary"], darkcolor=UI["primary"],
+                    font=ui_font(11, "bold"), padding=(18, 11))
+    style.map("Primary.TButton", background=[("disabled", "#A5A6CF"),
+              ("pressed", UI["primary_pressed"]), ("active", UI["primary_hover"])],
+              bordercolor=[("focus", UI["accent"]), ("active", UI["primary_hover"])])
+    style.configure("Quiet.TButton", background=UI["bg"], foreground=UI["muted"],
+                    bordercolor=UI["bg"], lightcolor=UI["bg"], darkcolor=UI["bg"], padding=(9, 7))
+    style.map("Quiet.TButton", background=[("pressed", "#E3E7EF"), ("active", UI["surface_muted"])],
+              foreground=[("active", UI["text"])])
+    style.configure("Card.TButton", background=UI["surface"], foreground=UI["text"],
+                    bordercolor=UI["border"], lightcolor=UI["surface"], darkcolor=UI["surface"],
+                    font=ui_font(10, "bold"), padding=(16, 16), anchor="w")
+    style.map("Card.TButton", background=[("pressed", "#E9ECF3"), ("active", "#F9FAFC")],
+              bordercolor=[("focus", UI["primary"]), ("active", "#B8C1D0")])
+    style.configure("Tool.TRadiobutton", background=UI["editor"], foreground="#C8CEDD",
+                    font=("Segoe UI Symbol", 12), padding=(9, 7), indicatorcolor=UI["editor"])
+    style.layout("Tool.TRadiobutton", [
+        ("Radiobutton.padding", {"sticky": "nswe", "children": [
+            ("Radiobutton.label", {"sticky": "nswe"}),
+        ]}),
+    ])
+    style.map("Tool.TRadiobutton", background=[("selected", UI["primary"]), ("active", UI["editor_hover"])],
+              foreground=[("selected", "#FFFFFF"), ("active", "#FFFFFF")],
+              indicatorcolor=[("selected", UI["primary"]), ("active", UI["editor_hover"])])
+    style.configure("Compact.TButton", background=UI["surface"], foreground=UI["text"],
+                    bordercolor=UI["border"], lightcolor=UI["surface"], darkcolor=UI["surface"],
+                    font=ui_font(9), padding=(7, 6), relief="flat")
+    style.map("Compact.TButton", background=[("pressed", UI["surface_muted"]), ("active", "#F8F9FC")],
+              bordercolor=[("focus", UI["primary"]), ("active", "#C7CFDC")])
+    style.configure("CompactPrimary.TButton", background=UI["primary"], foreground="#FFFFFF",
+                    bordercolor=UI["primary"], lightcolor=UI["primary"], darkcolor=UI["primary"],
+                    font=ui_font(9, "bold"), padding=(11, 6))
+    style.map("CompactPrimary.TButton", background=[("disabled", "#A5A6CF"),
+              ("pressed", UI["primary_pressed"]), ("active", UI["primary_hover"])])
+    style.configure("Dock.TButton", background=UI["editor"], foreground="#C8CEDD",
+                    bordercolor=UI["editor"], lightcolor=UI["editor"], darkcolor=UI["editor"],
+                    font=("Segoe UI Symbol", 12), padding=(8, 7), relief="flat")
+    style.map("Dock.TButton", background=[("pressed", "#303957"), ("active", UI["editor_hover"])],
+              foreground=[("active", "#FFFFFF")])
+    style.configure("DockPrimary.TButton", background=UI["primary"], foreground="#FFFFFF",
+                    bordercolor=UI["primary"], lightcolor=UI["primary"], darkcolor=UI["primary"],
+                    font=("Segoe UI Symbol", 12, "bold"), padding=(10, 7), relief="flat")
+    style.map("DockPrimary.TButton", background=[("pressed", UI["primary_pressed"]),
+              ("active", UI["primary_hover"])])
+    style.configure("TEntry", fieldbackground=UI["surface"], foreground=UI["text"],
+                    bordercolor=UI["border"], padding=7)
+    style.configure("TCombobox", fieldbackground=UI["surface"], foreground=UI["text"], padding=5)
+    style.configure("TCheckbutton", background=UI["bg"], foreground=UI["text"], font=ui_font(9))
+    style.map("TCheckbutton", background=[("active", UI["bg"])])
+    return style
+
+
+def draw_brand_mark(parent, size=38):
+    """Draw the pic-click crop-frame mark without an external icon dependency."""
+    mark = tk.Canvas(parent, width=size, height=size, bg=parent.cget("bg"), highlightthickness=0)
+    pad, arm = 7, 9
+    color, width = UI["primary"], 3
+    mark.create_line(pad, pad + arm, pad, pad, pad + arm, pad, fill=color, width=width)
+    mark.create_line(size-pad-arm, pad, size-pad, pad, size-pad, pad+arm, fill=color, width=width)
+    mark.create_line(pad, size-pad-arm, pad, size-pad, pad+arm, size-pad, fill=color, width=width)
+    mark.create_line(size-pad-arm, size-pad, size-pad, size-pad, size-pad, size-pad-arm, fill=color, width=width)
+    mark.create_oval(size//2-3, size//2-3, size//2+3, size//2+3, fill=UI["accent"], outline="")
+    return mark
 
 
 def setup_dpi():
@@ -114,6 +274,90 @@ def text_card(value, background="#ffffff", foreground="#202124"):
     for i, line in enumerate(lines):
         draw.text((24, 22 + i * 34), line, font=face, fill=foreground)
     return image
+
+
+def _riff_chunk(tag, payload):
+    padding = b"\0" if len(payload) % 2 else b""
+    return tag + struct.pack("<I", len(payload)) + payload + padding
+
+
+def _riff_list(kind, payload):
+    return _riff_chunk(b"LIST", kind + payload)
+
+
+class MjpegAviWriter:
+    """Write broadly compatible MJPEG/AVI video without an external encoder."""
+    def __init__(self, path, size, fps=10, quality=82):
+        self.path = Path(path)
+        self.width, self.height = map(int, size)
+        self.fps = max(1, int(fps))
+        self.quality = max(40, min(95, int(quality)))
+        self.frames = []
+        self.max_frame_size = 0
+        self.file = self.path.open("w+b")
+        header = self._header(0)
+        self.file.write(b"RIFF\0\0\0\0AVI " + header)
+        self.movi_start = self.file.tell()
+        self.file.write(b"LIST\0\0\0\0movi")
+        self.closed = False
+
+    def _header(self, frame_count):
+        frame_interval = round(1_000_000 / self.fps)
+        avih = struct.pack(
+            "<14I", frame_interval, self.max_frame_size * self.fps, 0, 0x10,
+            frame_count, 0, 1, self.max_frame_size, self.width, self.height,
+            0, 0, 0, 0,
+        )
+        strh = struct.pack(
+            "<4s4sIHH8I4h", b"vids", b"MJPG", 0, 0, 0,
+            0, 1, self.fps, 0, frame_count, self.max_frame_size,
+            0xFFFFFFFF, 0, 0, 0, self.width, self.height,
+        )
+        compression = struct.unpack("<I", b"MJPG")[0]
+        strf = struct.pack(
+            "<IiiHHIIiiII", 40, self.width, self.height, 1, 24,
+            compression, self.max_frame_size, 0, 0, 0, 0,
+        )
+        return _riff_list(b"hdrl", _riff_chunk(b"avih", avih) +
+                          _riff_list(b"strl", _riff_chunk(b"strh", strh) + _riff_chunk(b"strf", strf)))
+
+    def write(self, image):
+        if self.closed:
+            raise ValueError("视频写入器已经关闭")
+        image = image.convert("RGB")
+        if image.size != (self.width, self.height):
+            raise ValueError("录制帧尺寸发生变化")
+        stream = io.BytesIO()
+        image.save(stream, "JPEG", quality=self.quality, optimize=False)
+        payload = stream.getvalue()
+        chunk_position = self.file.tell()
+        self.file.write(_riff_chunk(b"00dc", payload))
+        self.frames.append((chunk_position - (self.movi_start + 8), len(payload)))
+        self.max_frame_size = max(self.max_frame_size, len(payload))
+
+    def close(self):
+        if self.closed:
+            return
+        movi_end = self.file.tell()
+        self.file.seek(self.movi_start + 4)
+        self.file.write(struct.pack("<I", movi_end - (self.movi_start + 8)))
+        self.file.seek(movi_end)
+        index = b"".join(struct.pack("<4sIII", b"00dc", 0x10, offset, length)
+                         for offset, length in self.frames)
+        self.file.write(_riff_chunk(b"idx1", index))
+        file_end = self.file.tell()
+        self.file.seek(4)
+        self.file.write(struct.pack("<I", file_end - 8))
+        self.file.seek(12)
+        self.file.write(self._header(len(self.frames)))
+        self.file.close()
+        self.closed = True
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, kind, value, trace):
+        self.close()
 
 
 def image_difference(first, second):
@@ -487,6 +731,7 @@ class Pin(tk.Toplevel):
         super().__init__(app.root)
         self.app, self.doc = app, document
         self.title("pic-click · 截图标注与贴图")
+        self.configure(bg=UI["bg"])
         self.attributes("-topmost", True)
         self.tool = tk.StringVar(value="移动")
         self.top = tk.BooleanVar(value=True)
@@ -509,36 +754,22 @@ class Pin(tk.Toplevel):
         self.color = tk.StringVar(value="#ff3b30")
         self.stroke = tk.IntVar(value=3)
         self.text_size = tk.IntVar(value=22)
-        bar = ttk.Frame(self, padding=5)
-        self.bar = bar
-        bar.pack(fill="x")
-        for name in ("移动", "矩形", "椭圆", "箭头", "画笔", "高亮", "马赛克", "序号", "文字"):
-            ttk.Radiobutton(bar, text="移动标注" if name == "移动" else name,
-                            value=name, variable=self.tool).pack(side="left")
-        actions = ttk.Frame(self, padding=(5, 0, 5, 5))
-        self.actions = actions
-        actions.pack(fill="x")
-        for text, command in (("撤销", self.undo), ("重做", self.redo), ("保存 PNG", self.export),
-                              ("上传云端", self.upload_cloud), ("保存设置", self.app.settings_dialog),
-                              ("复制", self.copy), ("关联说明", self.notes), ("贴到桌面", self.pin_desktop)):
-            ttk.Button(actions, text=text, command=command).pack(side="left", padx=2)
-        ttk.Checkbutton(actions, text="置顶", variable=self.top,
-                        command=lambda: self.attributes("-topmost", self.top.get())).pack(side="left")
-        self.options = ttk.Frame(self, padding=5)
-        self.options.pack(fill="x")
-        for color in ("#ff3b30", "#ffcc00", "#00aa66", "#1683ff", "#222222", "#ffffff"):
-            tk.Button(self.options, bg=color, width=2, command=lambda c=color: self.color.set(c)).pack(side="left", padx=2)
-        ttk.Label(self.options, text="线宽").pack(side="left")
-        ttk.Combobox(self.options, textvariable=self.stroke, values=(2, 3, 5, 8, 12), width=3, state="readonly").pack(side="left")
-        ttk.Label(self.options, text="字号").pack(side="left")
-        ttk.Combobox(self.options, textvariable=self.text_size, values=(14, 18, 22, 28, 36, 48), width=3, state="readonly").pack(side="left")
-        self.canvas = tk.Canvas(self, bg="#e8e8e8", highlightthickness=0)
+        self.color_buttons = {}
+        self.options = ttk.Frame(self)
+        self.dock_shell = tk.Frame(self, bg=UI["canvas"], pady=9)
+        self.dock_shell.pack(side="bottom", fill="x")
+        self.dock = tk.Frame(self.dock_shell, bg=UI["editor"], padx=6, pady=5,
+                             highlightbackground="#303957", highlightthickness=1)
+        self.dock.pack()
+        self.bar = self.actions = self.dock
+        self.build_editor_dock()
+        self.canvas = tk.Canvas(self, bg=UI["canvas"], highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)
-        self.status = ttk.Label(self, text="移动标注可拖动文字、序号、画笔和形状 · Ctrl+Z 撤销", padding=5)
-        self.status.pack(fill="x")
+        self.status = ttk.Label(self, text="移动标注可拖动文字、序号、画笔和形状 · Ctrl+Z 撤销",
+                                style="Muted.TLabel", padding=(12, 7))
         w, h = self.doc.base.size
         w = min(max(w, 600), int(self.winfo_screenwidth() * .8))
-        h = min(max(h + 110, 250), int(self.winfo_screenheight() * .8))
+        h = min(max(h + 74, 250), int(self.winfo_screenheight() * .8))
         self.geometry(f"{w}x{h}")
         self.canvas.bind("<Configure>", lambda event: self.redraw())
         self.canvas.bind("<ButtonPress-1>", self.press)
@@ -569,6 +800,71 @@ class Pin(tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", self.close)
         app.pins.append(self)
 
+    def build_editor_dock(self):
+        for child in self.dock.winfo_children():
+            child.destroy()
+        action_commands = {
+            "undo": self.undo, "redo": self.redo, "save": self.export,
+            "upload": self.upload_cloud, "copy": self.copy, "pin": self.pin_desktop,
+        }
+        last_kind = None
+        for item_id in self.app.toolbar_order:
+            if item_id in self.app.toolbar_hidden or item_id not in TOOLBAR_BY_ID:
+                continue
+            _, label, symbol, kind = TOOLBAR_BY_ID[item_id]
+            if last_kind and kind != last_kind and not ({last_kind, kind} <= {"action", "primary"}):
+                tk.Frame(self.dock, bg="#3A425D", width=1, height=28).pack(side="left", padx=4)
+            if kind == "tool":
+                widget = ttk.Radiobutton(self.dock, text=symbol, value=TOOL_VALUES[item_id],
+                                         variable=self.tool, style="Tool.TRadiobutton", width=2,
+                                         takefocus=True)
+            elif kind == "style":
+                widget = ttk.Button(self.dock, text=symbol, command=self.show_style_menu,
+                                    style="Dock.TButton", width=2)
+            else:
+                widget = ttk.Button(self.dock, text=symbol, command=action_commands[item_id],
+                                    style="DockPrimary.TButton" if kind == "primary" else "Dock.TButton", width=2)
+            widget.pack(side="left", padx=1)
+            attach_tooltip(widget, label)
+            last_kind = kind
+        tk.Frame(self.dock, bg="#3A425D", width=1, height=28).pack(side="left", padx=4)
+        more = ttk.Button(self.dock, text="⋯", command=self.show_more_menu, style="Dock.TButton", width=2)
+        more.pack(side="left", padx=1)
+        attach_tooltip(more, "更多与自定义")
+
+    def show_style_menu(self):
+        menu = tk.Menu(self, tearoff=False)
+        for color in ("#ff3b30", "#ffcc00", "#00aa66", "#1683ff", "#222222", "#ffffff"):
+            menu.add_radiobutton(label=color.upper(), variable=self.color, value=color)
+        width_menu = tk.Menu(menu, tearoff=False)
+        for value in (2, 3, 5, 8, 12):
+            width_menu.add_radiobutton(label=f"{value} px", variable=self.stroke, value=value)
+        size_menu = tk.Menu(menu, tearoff=False)
+        for value in (14, 18, 22, 28, 36, 48):
+            size_menu.add_radiobutton(label=f"{value} px", variable=self.text_size, value=value)
+        menu.add_separator()
+        menu.add_cascade(label="线宽", menu=width_menu)
+        menu.add_cascade(label="字号", menu=size_menu)
+        menu.tk_popup(self.winfo_pointerx(), self.winfo_pointery())
+
+    def show_more_menu(self):
+        menu = tk.Menu(self, tearoff=False)
+        menu.add_command(label="关联说明", command=self.notes)
+        menu.add_checkbutton(label="窗口置顶", variable=self.top,
+                             command=lambda: self.attributes("-topmost", self.top.get()))
+        menu.add_separator()
+        menu.add_command(label="自定义 Dock…", command=self.app.toolbar_dialog)
+        menu.add_command(label="保存设置…", command=self.app.settings_dialog)
+        menu.add_command(label="云端设置…", command=self.app.cloud_dialog)
+        menu.tk_popup(self.winfo_pointerx(), self.winfo_pointery())
+
+    def select_color(self, color):
+        self.color.set(color)
+        for value, button in getattr(self, "color_buttons", {}).items():
+            selected = value.lower() == color.lower()
+            button.configure(highlightbackground=UI["primary"] if selected else UI["bg"],
+                             relief="solid" if selected else "flat", bd=1 if selected else 0)
+
     def checkpoint(self):
         self.undo_stack.append(copy.deepcopy(self.doc.data["marks"]))
         self.redo_stack.clear()
@@ -582,8 +878,7 @@ class Pin(tk.Toplevel):
         self.selected_index = None
         self.zoom = min(self.zoom, self.winfo_screenwidth()/self.doc.base.width, self.winfo_screenheight()/self.doc.base.height)
         self.tool.set("移动")
-        for widget in (self.bar, self.actions, self.options, self.status):
-            widget.pack_forget()
+        self.dock_shell.pack_forget()
         self.overrideredirect(True)
         self.resize_pin()
         self.focus_force()
@@ -599,10 +894,8 @@ class Pin(tk.Toplevel):
         else:
             self.compact = False
             self.overrideredirect(False)
-            for widget in (self.bar, self.actions, self.options):
-                widget.pack(fill="x", before=self.canvas)
-            self.status.pack(fill="x")
-            self.geometry(f"{max(680, self.doc.base.width)}x{min(self.winfo_screenheight()-100, self.doc.base.height+160)}")
+            self.dock_shell.pack(side="bottom", fill="x", before=self.canvas)
+            self.geometry(f"{max(680, self.doc.base.width)}x{min(self.winfo_screenheight()-100, self.doc.base.height+90)}")
         return "break"
 
     def wheel(self, event):
@@ -1004,6 +1297,7 @@ class Pin(tk.Toplevel):
 class App:
     def __init__(self, root, data_dir, enable_tray=True):
         self.root = root
+        self.style = configure_ui(root)
         local_root = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "pic-click"
         self.settings_file = local_root / "settings.json"
         default_capture_dir = str(Path(data_dir) if data_dir else local_root / "captures")
@@ -1012,6 +1306,10 @@ class App:
             "capture_dir": default_capture_dir,
             "export_dir": default_export_dir,
             "auto_save_png": False,
+            "toolbar_order": list(DEFAULT_TOOLBAR_ORDER),
+            "toolbar_hidden": [],
+            "record_fps": 10,
+            "record_quality": 82,
             "cloud": {
                 "provider": "WebDAV", "endpoint": "", "username": "", "secret": "",
                 "remote_folder": "pic-click", "public_base_url": "", "auto_upload": False,
@@ -1022,6 +1320,12 @@ class App:
         self.export_dir = Path(self.settings["export_dir"])
         self.auto_save_png = self.settings["auto_save_png"]
         self.cloud_settings = self.settings["cloud"]
+        stored_order = self.settings.get("toolbar_order", DEFAULT_TOOLBAR_ORDER)
+        self.toolbar_order = [item for item in stored_order if item in TOOLBAR_BY_ID]
+        self.toolbar_order += [item for item in DEFAULT_TOOLBAR_ORDER if item not in self.toolbar_order]
+        self.toolbar_hidden = {item for item in self.settings.get("toolbar_hidden", []) if item in TOOLBAR_BY_ID}
+        self.record_fps = self.settings.get("record_fps", 10)
+        self.record_quality = self.settings.get("record_quality", 82)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.pins = []
         self.closed_documents = []
@@ -1032,23 +1336,65 @@ class App:
         self.tray = None
         self.capturing = False
         root.title("pic-click · 截图、标注、贴图")
-        root.geometry("540x310")
-        ttk.Label(root, text="pic-click", font=("Microsoft YaHei UI", 24, "bold"), padding=12).pack()
-        ttk.Label(root, text="截图 → 标注 → 贴在屏幕上", font=("Microsoft YaHei UI", 13)).pack()
-        ttk.Label(root, text="原屏幕保持清晰；矩形、箭头、高亮、文字\n每张截图可关联自己的文字、图片和视频", justify="center").pack()
-        row = ttk.Frame(root, padding=15)
-        row.pack()
-        ttk.Button(row, text="开始框选截图", command=self.capture).pack(side="left", padx=5)
-        ttk.Button(row, text="历史截图", command=self.history).pack(side="left", padx=5)
-        ttk.Button(row, text="剪贴板贴图", command=self.paste).pack(side="left", padx=5)
-        controls = ttk.Frame(root)
-        controls.pack()
-        ttk.Button(controls, text="显示 / 隐藏全部贴图", command=self.toggle_pins).pack(side="left", padx=4)
-        ttk.Button(controls, text="保存设置", command=self.settings_dialog).pack(side="left", padx=4)
-        ttk.Button(controls, text="云端设置", command=self.cloud_dialog).pack(side="left", padx=4)
-        self.status = ttk.Label(root, text="截图时拖动鼠标框选，Esc 取消", padding=8)
-        self.status.pack()
-        ttk.Button(root, text="打开截图资料目录", command=lambda: os.startfile(str(self.data_dir.resolve()))).pack()
+        root.geometry("720x510")
+        root.minsize(660, 470)
+
+        shell = tk.Frame(root, bg=UI["bg"], padx=26, pady=22)
+        shell.pack(fill="both", expand=True)
+        header = tk.Frame(shell, bg=UI["bg"])
+        header.pack(fill="x", pady=(0, 20))
+        draw_brand_mark(header, 42).pack(side="left", padx=(0, 10))
+        brand = tk.Frame(header, bg=UI["bg"])
+        brand.pack(side="left")
+        tk.Label(brand, text="pic-click", bg=UI["bg"], fg=UI["text"],
+                 font=ui_font(18, "bold")).pack(anchor="w")
+        tk.Label(brand, text="轻量截图、标注与桌面贴图", bg=UI["bg"], fg=UI["muted"],
+                 font=ui_font(9)).pack(anchor="w")
+        ttk.Button(header, text="云端设置", command=self.cloud_dialog, style="Quiet.TButton").pack(side="right")
+        ttk.Button(header, text="自定义 Dock", command=self.toolbar_dialog, style="Quiet.TButton").pack(side="right", padx=(0, 4))
+        ttk.Button(header, text="保存设置", command=self.settings_dialog, style="Quiet.TButton").pack(side="right", padx=(0, 4))
+
+        hero = tk.Frame(shell, bg=UI["editor"], padx=24, pady=20)
+        hero.pack(fill="x")
+        hero_text = tk.Frame(hero, bg=UI["editor"])
+        hero_text.pack(side="left", fill="both", expand=True)
+        tk.Label(hero_text, text="捕捉屏幕，马上继续工作", bg=UI["editor"], fg="#FFFFFF",
+                 font=ui_font(16, "bold")).pack(anchor="w")
+        tk.Label(hero_text, text="框选后可直接标注、复制、长截图或贴在桌面上",
+                 bg=UI["editor"], fg="#AEB7CC", font=ui_font(9)).pack(anchor="w", pady=(6, 0))
+        primary = ttk.Button(hero, text="开始框选截图", command=self.capture, style="Primary.TButton")
+        primary.pack(side="right", padx=(16, 0))
+        tk.Label(hero, text="F1", bg="#2B324A", fg="#DDE3F0", padx=8, pady=4,
+                 font=("Segoe UI", 9, "bold")).pack(side="right")
+        ttk.Button(hero, text="录制屏幕", command=lambda: self.capture("record"),
+                   style="Dock.TButton").pack(side="right", padx=(8, 0))
+
+        section = tk.Frame(shell, bg=UI["bg"])
+        section.pack(fill="x", pady=(22, 10))
+        tk.Label(section, text="快速操作", bg=UI["bg"], fg=UI["text"],
+                 font=ui_font(11, "bold")).pack(side="left")
+        tk.Label(section, text="无需进入复杂菜单", bg=UI["bg"], fg=UI["muted"],
+                 font=ui_font(9)).pack(side="left", padx=10)
+
+        quick = ttk.Frame(shell)
+        quick.pack(fill="x")
+        for column in range(3):
+            quick.columnconfigure(column, weight=1, uniform="quick")
+        ttk.Button(quick, text="历史截图\n继续查看与编辑", command=self.history,
+                   style="Card.TButton").grid(row=0, column=0, sticky="nsew", padx=(0, 7))
+        ttk.Button(quick, text="剪贴板贴图\nF3 · 图片、文字或颜色", command=self.paste,
+                   style="Card.TButton").grid(row=0, column=1, sticky="nsew", padx=7)
+        ttk.Button(quick, text="显示 / 隐藏全部贴图\nShift+F3 · 保持桌面清爽", command=self.toggle_pins,
+                   style="Card.TButton").grid(row=0, column=2, sticky="nsew", padx=(7, 0))
+
+        footer = tk.Frame(shell, bg=UI["surface"], highlightbackground=UI["border"],
+                          highlightthickness=1, padx=13, pady=10)
+        footer.pack(fill="x", pady=(20, 0))
+        tk.Label(footer, text="●", bg=UI["surface"], fg=UI["success"], font=("Segoe UI", 9)).pack(side="left")
+        self.status = ttk.Label(footer, text="截图时拖动鼠标框选，Esc 取消", style="Surface.TLabel")
+        self.status.pack(side="left", padx=(6, 0))
+        ttk.Button(footer, text="打开资料目录", command=lambda: os.startfile(str(self.data_dir.resolve())),
+                   style="Quiet.TButton").pack(side="right")
         root.bind("<Control-Shift-s>", lambda event: self.capture())
         self.hotkey = False
         self.extra_hotkeys = []
@@ -1075,6 +1421,7 @@ class App:
             schedule = lambda action: (lambda icon=None, item=None: self.root.after(0, action))
             menu = pystray.Menu(
                 pystray.MenuItem("截图（F1）", schedule(self.capture), default=True),
+                pystray.MenuItem("录制屏幕", schedule(lambda: self.capture("record"))),
                 pystray.MenuItem("剪贴板贴图（F3）", schedule(self.paste)),
                 pystray.MenuItem("显示 / 隐藏贴图", schedule(self.toggle_pins)),
                 pystray.MenuItem("打开主窗口", schedule(self.show_main)),
@@ -1091,15 +1438,96 @@ class App:
         self.root.lift()
         self.root.focus_force()
 
+    def toolbar_dialog(self):
+        win = tk.Toplevel(self.root)
+        win.title("pic-click · 自定义截图 Dock")
+        win.geometry("520x540")
+        win.minsize(480, 460)
+        win.configure(bg=UI["bg"])
+        win.transient(self.root)
+        win.attributes("-topmost", True)
+        ttk.Label(win, text="自定义截图 Dock", font=ui_font(16, "bold"), padding=(20, 18, 20, 2)).pack(anchor="w")
+        ttk.Label(win, text="双击显示或隐藏工具；使用右侧按钮调整排列顺序。Dock 会立即更新。",
+                  style="Muted.TLabel", padding=(20, 0, 20, 14)).pack(anchor="w")
+        body = ttk.Frame(win, padding=(20, 0, 20, 0))
+        body.pack(fill="both", expand=True)
+        working_order = list(self.toolbar_order)
+        working_hidden = set(self.toolbar_hidden)
+        listing = tk.Listbox(body, bg=UI["surface"], fg=UI["text"], selectbackground=UI["primary"],
+                             selectforeground="#FFFFFF", activestyle="none", bd=0, highlightthickness=1,
+                             highlightbackground=UI["border"], font=ui_font(10), relief="flat")
+        listing.pack(side="left", fill="both", expand=True)
+
+        def refresh(selection=None):
+            current = selection if selection is not None else (listing.curselection()[0] if listing.curselection() else 0)
+            listing.delete(0, "end")
+            for item_id in working_order:
+                _, label, symbol, _ = TOOLBAR_BY_ID[item_id]
+                listing.insert("end", f"{'☐' if item_id in working_hidden else '☑'}    {symbol}    {label}")
+            if working_order:
+                listing.selection_set(max(0, min(current, len(working_order)-1)))
+
+        def toggle(event=None):
+            if not listing.curselection():
+                return
+            item_id = working_order[listing.curselection()[0]]
+            if item_id in working_hidden:
+                working_hidden.remove(item_id)
+            else:
+                working_hidden.add(item_id)
+            refresh()
+
+        def move(delta):
+            if not listing.curselection():
+                return
+            index = listing.curselection()[0]
+            target = max(0, min(len(working_order)-1, index + delta))
+            if target != index:
+                working_order[index], working_order[target] = working_order[target], working_order[index]
+            refresh(target)
+
+        controls = ttk.Frame(body, padding=(10, 0, 0, 0))
+        controls.pack(side="right", fill="y")
+        ttk.Button(controls, text="显示 / 隐藏", command=toggle).pack(fill="x", pady=(0, 8))
+        ttk.Button(controls, text="上移", command=lambda: move(-1)).pack(fill="x", pady=(0, 8))
+        ttk.Button(controls, text="下移", command=lambda: move(1)).pack(fill="x")
+        listing.bind("<Double-Button-1>", toggle)
+        refresh()
+
+        def apply():
+            self.toolbar_order = list(working_order)
+            self.toolbar_hidden = set(working_hidden)
+            self.settings.update({"toolbar_order": self.toolbar_order,
+                                  "toolbar_hidden": sorted(self.toolbar_hidden)})
+            save_settings(self.settings_file, self.settings)
+            for pin in self.pins:
+                if pin.winfo_exists():
+                    pin.build_editor_dock()
+            win.destroy()
+
+        def reset():
+            working_order[:] = DEFAULT_TOOLBAR_ORDER
+            working_hidden.clear()
+            refresh(0)
+
+        actions = ttk.Frame(win, padding=(20, 14, 20, 18))
+        actions.pack(fill="x")
+        ttk.Button(actions, text="保存", command=apply, style="Primary.TButton").pack(side="right")
+        ttk.Button(actions, text="取消", command=win.destroy).pack(side="right", padx=(0, 8))
+        ttk.Button(actions, text="恢复默认", command=reset, style="Quiet.TButton").pack(side="left")
+        win.grab_set()
+
     def settings_dialog(self):
         win = tk.Toplevel(self.root)
         win.title("pic-click · 保存设置")
-        win.geometry("650x260")
+        win.geometry("650x350")
         win.transient(self.root)
         win.attributes("-topmost", True)
         capture_value = tk.StringVar(value=str(self.data_dir))
         export_value = tk.StringVar(value=str(self.export_dir))
         auto_value = tk.BooleanVar(value=self.auto_save_png)
+        record_fps_value = tk.IntVar(value=self.record_fps)
+        record_quality_value = tk.IntVar(value=self.record_quality)
 
         def path_row(label, variable):
             row = ttk.Frame(win, padding=(12, 10, 12, 0))
@@ -1116,6 +1544,16 @@ class App:
         path_row("默认 PNG 保存目录", export_value)
         ttk.Checkbutton(win, text="截图或剪贴板贴图创建后自动保存一份 PNG",
                         variable=auto_value).pack(anchor="w", padx=28, pady=14)
+        record_row = ttk.Frame(win, padding=(28, 0, 28, 10))
+        record_row.pack(fill="x")
+        ttk.Label(record_row, text="视频录制").pack(side="left")
+        ttk.Label(record_row, text="帧率", style="Muted.TLabel").pack(side="left", padx=(22, 6))
+        ttk.Combobox(record_row, textvariable=record_fps_value, values=(8, 10, 15), width=5,
+                     state="readonly").pack(side="left")
+        ttk.Label(record_row, text="画质", style="Muted.TLabel").pack(side="left", padx=(18, 6))
+        ttk.Combobox(record_row, textvariable=record_quality_value, values=(70, 82, 90), width=5,
+                     state="readonly").pack(side="left")
+        ttk.Label(record_row, text="MJPEG AVI · 无音频", style="Muted.TLabel").pack(side="left", padx=(18, 0))
         ttk.Label(win, text="目录修改只影响之后创建的截图；已有截图仍保留在原目录。",
                   foreground="#666666").pack(anchor="w", padx=28)
 
@@ -1129,12 +1567,16 @@ class App:
                 export_dir.mkdir(parents=True, exist_ok=True)
                 self.data_dir, self.export_dir = capture_dir, export_dir
                 self.auto_save_png = auto_value.get()
-                self.settings = {
+                self.record_fps = record_fps_value.get()
+                self.record_quality = record_quality_value.get()
+                self.settings.update({
                     "capture_dir": str(capture_dir.resolve()),
                     "export_dir": str(export_dir.resolve()),
                     "auto_save_png": self.auto_save_png,
+                    "record_fps": self.record_fps,
+                    "record_quality": self.record_quality,
                     "cloud": self.cloud_settings,
-                }
+                })
                 save_settings(self.settings_file, self.settings)
             except (OSError, ValueError) as error:
                 messagebox.showerror("设置无法保存", str(error), parent=win)
@@ -1396,6 +1838,141 @@ class App:
             win.withdraw()
         self.root.after(250, self.overlay)
 
+    def begin_screen_recording(self, rect):
+        """Record a selected desktop region to an MJPEG AVI with a minimal control Dock."""
+        if sys.platform != "win32":
+            self.restore()
+            messagebox.showerror("暂时无法录制", "视频录制目前仅支持 Windows 桌面。", parent=self.root)
+            return
+        x1, y1, x2, y2 = map(int, rect)
+        width, height = x2 - x1, y2 - y1
+        if width < 16 or height < 16:
+            self.restore()
+            return
+        self.export_dir.mkdir(parents=True, exist_ok=True)
+        target = self.export_dir / (datetime.now().strftime("pic-click_record_%Y%m%d_%H%M%S") + ".avi")
+        try:
+            writer = MjpegAviWriter(target, (width, height), self.record_fps, self.record_quality)
+        except OSError as error:
+            self.restore()
+            messagebox.showerror("无法开始录制", str(error), parent=self.root)
+            return
+
+        panel = tk.Toplevel(self.root)
+        panel.overrideredirect(True)
+        panel.attributes("-topmost", True)
+        panel.configure(bg=UI["editor"])
+        dock = tk.Frame(panel, bg=UI["editor"], padx=9, pady=7,
+                        highlightbackground="#3A425D", highlightthickness=1)
+        dock.pack()
+        dot = tk.Label(dock, text="●", bg=UI["editor"], fg="#FF4D4F", font=("Segoe UI", 11))
+        dot.pack(side="left")
+        timer = tk.Label(dock, text="00:00", bg=UI["editor"], fg="#FFFFFF",
+                         font=("Consolas", 10, "bold"), width=6)
+        timer.pack(side="left", padx=(4, 8))
+        state = {"active": True, "paused": False, "after": None, "started": time.monotonic(),
+                 "paused_at": None, "paused_total": 0.0, "frames": 0,
+                 "next_frame": time.monotonic() + 0.12}
+
+        user = ctypes.windll.user32
+        target_hwnd = self.capture_target_hwnd
+        if target_hwnd:
+            user.SetForegroundWindow(target_hwnd)
+
+        def elapsed():
+            end = state["paused_at"] if state["paused"] else time.monotonic()
+            return max(0.0, end - state["started"] - state["paused_total"])
+
+        def finish(cancelled=False, error=None):
+            if not state["active"]:
+                return
+            state["active"] = False
+            if state["after"]:
+                try:
+                    self.root.after_cancel(state["after"])
+                except tk.TclError:
+                    pass
+            try:
+                writer.close()
+            except OSError as caught:
+                error = error or caught
+            if panel.winfo_exists():
+                panel.destroy()
+            self.restore()
+            if cancelled or error or not state["frames"]:
+                try:
+                    target.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                self.status.config(text="录制已取消" if cancelled else "视频录制失败")
+                if error:
+                    messagebox.showerror("视频录制失败", str(error), parent=self.root)
+                return
+            self.status.config(text=f"录制完成 · {elapsed():.1f} 秒 · {target}")
+            messagebox.showinfo("录制完成", f"视频已保存：\n{target}", parent=self.root)
+
+        pause_button = tk.Button(dock, text="暂停", bg=UI["editor"], fg="#E6E9F2",
+                                 activebackground=UI["editor_hover"], activeforeground="#FFFFFF",
+                                 relief="flat", bd=0, padx=10, pady=4, font=ui_font(9))
+
+        def toggle_pause():
+            if state["paused"]:
+                state["paused_total"] += time.monotonic() - state["paused_at"]
+                state["paused_at"] = None
+                state["paused"] = False
+                state["next_frame"] = time.monotonic()
+                pause_button.config(text="暂停")
+                dot.config(fg="#FF4D4F")
+            else:
+                state["paused"] = True
+                state["paused_at"] = time.monotonic()
+                pause_button.config(text="继续")
+                dot.config(fg="#FBBF24")
+
+        pause_button.config(command=toggle_pause)
+        pause_button.pack(side="left")
+        tk.Button(dock, text="完成", command=finish, bg=UI["primary"], fg="#FFFFFF",
+                  activebackground=UI["primary_hover"], activeforeground="#FFFFFF",
+                  relief="flat", bd=0, padx=12, pady=4, font=ui_font(9, "bold")).pack(side="left", padx=4)
+        tk.Button(dock, text="取消", command=lambda: finish(cancelled=True), bg=UI["editor"], fg="#FFB4AB",
+                  activebackground="#40262C", activeforeground="#FFFFFF",
+                  relief="flat", bd=0, padx=9, pady=4, font=ui_font(9)).pack(side="left")
+        panel.update_idletasks()
+        panel_width, panel_height = panel.winfo_reqwidth(), panel.winfo_reqheight()
+        screen_width, screen_height = panel.winfo_screenwidth(), panel.winfo_screenheight()
+        panel_x = max(8, min(screen_width-panel_width-8, x1 + (width-panel_width)//2))
+        below = y2 + 10
+        panel_y = below if below + panel_height < screen_height-8 else max(8, y1-panel_height-10)
+        panel.geometry(f"+{panel_x}+{panel_y}")
+        panel.update_idletasks()
+        user.SetWindowDisplayAffinity(wintypes.HWND(panel.winfo_id()), 0x00000011)
+
+        def capture_frame():
+            return ImageGrab.grab(bbox=(x1, y1, x2, y2), all_screens=True).convert("RGB")
+
+        def tick():
+            if not state["active"]:
+                return
+            try:
+                if not state["paused"]:
+                    writer.write(capture_frame())
+                    state["frames"] += 1
+                    if writer.file.tell() > 2_000_000_000:
+                        finish(error=ValueError("视频已接近 AVI 容量上限，请开始新的录制。"))
+                        return
+                seconds = int(elapsed())
+                timer.config(text=f"{seconds//60:02d}:{seconds%60:02d}")
+                state["next_frame"] += 1 / self.record_fps
+                now = time.monotonic()
+                if state["next_frame"] < now:
+                    state["next_frame"] = now
+                state["after"] = self.root.after(max(1, round((state["next_frame"]-now)*1000)), tick)
+            except Exception as error:
+                finish(error=error)
+
+        panel.bind("<Escape>", lambda event: finish())
+        state["after"] = self.root.after(120, tick)
+
     def begin_scroll_capture(self, rect, first_frame):
         """Watch a manually scrolled target and collect stable, overlapping viewports."""
         collector = ScrollFrameCollector(first_frame)
@@ -1624,7 +2201,7 @@ class App:
                 self.root.clipboard_clear()
                 self.root.clipboard_append(current_color[0])
                 canvas.itemconfigure("guide", text=f"已复制颜色 {current_color[0]} · F3 可贴成颜色卡")
-            def accept(pin_direct=False, copy_direct=False, scroll_capture=False):
+            def accept(pin_direct=False, copy_direct=False, scroll_capture=False, record_capture=False):
                 if accepted[0]:
                     return
                 x1, x2 = sorted((selection[0], selection[2]))
@@ -1634,6 +2211,14 @@ class App:
                 accepted[0] = True
                 self.last_rect = tuple(selection)
                 crop = desktop.crop((x1, y1, x2, y2))
+                if record_capture:
+                    try:
+                        overlay.grab_release()
+                    except tk.TclError:
+                        pass
+                    overlay.destroy()
+                    self.begin_screen_recording((left+x1, top+y1, left+x2, top+y2))
+                    return
                 if scroll_capture:
                     try:
                         overlay.grab_release()
@@ -1657,18 +2242,26 @@ class App:
                     pin.pin_desktop()
             def show_dock():
                 if dock[0] is None:
-                    bar = dock[0] = tk.Frame(canvas, bg="#252932", bd=0, padx=6, pady=5)
+                    bar = dock[0] = tk.Frame(canvas, bg="#151A2D", bd=0, padx=7, pady=6,
+                                             highlightbackground="#303957", highlightthickness=1)
                     buttons = (
                         ("✓  完成", lambda: accept()),
                         ("↕  滚动截图", lambda: accept(scroll_capture=True)),
+                        ("●  录制", lambda: accept(record_capture=True)),
                         ("▣  复制", lambda: accept(copy_direct=True)),
                         ("▤  贴图", lambda: accept(pin_direct=True)),
                         ("×  取消", finish),
                     )
-                    for label, command in buttons:
-                        tk.Button(bar, text=label, command=command, bg="#252932", fg="#f1f3f4",
-                                  activebackground="#3b414d", activeforeground="white", relief="flat",
-                                  bd=0, padx=10, pady=5, font=("Microsoft YaHei UI", 10)).pack(side="left")
+                    for index, (label, command) in enumerate(buttons):
+                        primary_action = index == 0
+                        cancel_action = index == len(buttons) - 1
+                        bg = UI["primary"] if primary_action else "#151A2D"
+                        active = UI["primary_hover"] if primary_action else ("#40262C" if cancel_action else "#262D45")
+                        fg = "#FFFFFF" if primary_action else ("#FFB4AB" if cancel_action else "#E6E9F2")
+                        tk.Button(bar, text=label, command=command, bg=bg, fg=fg,
+                                  activebackground=active, activeforeground="white", relief="flat",
+                                  bd=0, padx=12, pady=6, cursor="hand2",
+                                  font=ui_font(9, "bold" if primary_action else "normal")).pack(side="left", padx=2)
                     bar.update_idletasks()
                     dock_window[0] = canvas.create_window(0, 0, window=bar, anchor="n", tags="capture_dock")
                 width = dock[0].winfo_reqwidth()
@@ -1686,7 +2279,10 @@ class App:
                 x1, x2 = sorted((selection[0], selection[2]))
                 y1, y2 = sorted((selection[1], selection[3]))
                 if x2-x1 >= 4 and y2-y1 >= 4:
-                    show_dock()
+                    if self.capture_mode == "record":
+                        accept(record_capture=True)
+                    else:
+                        show_dock()
             def adjust(event):
                 key = event.keysym
                 dx = -1 if key == "Left" else 1 if key == "Right" else 0
@@ -1723,22 +2319,42 @@ class App:
 
     def history(self):
         win = tk.Toplevel(self.root)
-        win.title("历史截图 · 双击打开")
-        win.geometry("480x320")
-        listing = tk.Listbox(win)
-        listing.pack(fill="both", expand=True, padx=8, pady=8)
+        win.title("pic-click · 历史截图")
+        win.geometry("560x400")
+        win.minsize(480, 340)
+        win.configure(bg=UI["bg"])
+        win.transient(self.root)
+        header = tk.Frame(win, bg=UI["bg"], padx=20, pady=16)
+        header.pack(fill="x")
+        tk.Label(header, text="历史截图", bg=UI["bg"], fg=UI["text"],
+                 font=ui_font(16, "bold")).pack(anchor="w")
+        tk.Label(header, text="双击记录即可继续标注或贴图", bg=UI["bg"], fg=UI["muted"],
+                 font=ui_font(9)).pack(anchor="w", pady=(3, 0))
+        content = tk.Frame(win, bg=UI["surface"], highlightbackground=UI["border"], highlightthickness=1)
+        content.pack(fill="both", expand=True, padx=20)
+        listing = tk.Listbox(content, bg=UI["surface"], fg=UI["text"], selectbackground=UI["primary"],
+                             selectforeground="#FFFFFF", activestyle="none", bd=0, highlightthickness=0,
+                             font=ui_font(10), relief="flat")
+        listing.pack(fill="both", expand=True, padx=12, pady=10)
         files = sorted(self.data_dir.glob("*/metadata.json"), key=lambda p: p.stat().st_mtime, reverse=True)
         from datetime import datetime
         for path in files:
-            listing.insert("end", datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S") + "  " + path.parent.name[:8])
+            listing.insert("end", datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d  %H:%M") + "    " + path.parent.name[:8])
+        if not files:
+            listing.insert("end", "暂无截图 · 按 F1 创建第一张截图")
+            listing.configure(state="disabled", disabledforeground=UI["muted"])
         def open_doc(event=None):
-            if listing.curselection():
+            if files and listing.curselection():
                 try:
                     Pin(self, Document(files[listing.curselection()[0]].parent))
                 except Exception as error:
                     messagebox.showerror("读取失败", str(error), parent=win)
         listing.bind("<Double-Button-1>", open_doc)
-        ttk.Button(win, text="打开所选截图", command=open_doc).pack(pady=5)
+        actions = ttk.Frame(win, padding=(20, 12, 20, 16))
+        actions.pack(fill="x")
+        ttk.Button(actions, text="关闭", command=win.destroy).pack(side="right")
+        ttk.Button(actions, text="打开所选截图", command=open_doc, style="Primary.TButton",
+                   state="normal" if files else "disabled").pack(side="right", padx=(0, 8))
 
 
 def main():
