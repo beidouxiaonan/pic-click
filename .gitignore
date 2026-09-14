@@ -1,0 +1,10 @@
+__pycache__/
+test-output/
+test-output-*/
+*.log
+.vendor/
+.skill-staging/
+build/
+dist/
+package-staging/
+*.spec
