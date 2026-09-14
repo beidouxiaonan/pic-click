@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0d1224" />
+    <meta
+      name="description"
+      content="pic-click 是一款把截图、标注、长截图、录屏和桌面贴图收进一条 Dock 的开源桌面工具。"
+    />
+    <meta property="og:title" content="pic-click — 截图，不该打断思路" />
+    <meta
+      property="og:description"
+      content="截图、标注、长截图、录屏和桌面贴图，一条 Dock 就够了。"
+    />
+    <meta property="og:type" content="website" />
+    <meta
+      property="og:image"
+      content="https://beidouxiaonan.github.io/pic-click/assets/ui-home.png"
+    />
+    <title>pic-click — 截图，不该打断思路</title>
+    <link rel="stylesheet" href="./site.css" />
+    <script src="./site.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳到主要内容</a>
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="pic-click 首页">
+        <span class="brand-mark" aria-hidden="true"><i></i></span>
+        <span>pic-click</span>
+      </a>
+      <nav aria-label="主要导航">
+        <a href="#interfaces">界面</a>
+        <a href="#features">能力</a>
+        <a href="#workflow">使用方式</a>
+      </nav>
+      <a class="header-link" href="https://github.com/beidouxiaonan/pic-click">GitHub ↗</a>
+    </header>
+
+    <main id="main">
+      <section class="hero" id="top">
+        <div class="hero-copy reveal">
+          <p class="eyebrow"><span></span> Windows · Local-first · Open Source</p>
+          <h1>截图，不该<br />打断思路。</h1>
+          <p class="hero-lead">
+            pic-click 把截图、标注、长截图、录屏和桌面贴图收进一条 Dock。常用能力直接出现，更多选择随时展开。
+          </p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="https://github.com/beidouxiaonan/pic-click">查看源码 <span>↗</span></a>
+            <a class="button button-quiet" href="#interfaces">浏览界面 <span>↓</span></a>
+          </div>
+          <ul class="hero-notes" aria-label="产品特点">
+            <li>数据留在本地</li>
+            <li>Dock 可自定义</li>
+            <li>快捷键随手可达</li>
+          </ul>
+        </div>
+
+        <div class="hero-stage reveal" aria-label="pic-click 截图编辑器界面预览">
+          <div class="window-frame">
+            <div class="window-bar"><span></span><span></span><span></span><b>pic-click</b></div>
+            <img src="./assets/ui-editor.png" alt="pic-click 截图编辑器与底部单 Dock" />
+          </div>
+          <div class="floating-card floating-card-record">
+            <span class="record-dot"></span>
+            <div><b>屏幕录制</b><small>画面与操作，一起留下</small></div>
+          </div>
+          <div class="floating-card floating-card-dock">
+            <span class="dock-mini" aria-hidden="true">↖　□　○　↗　✎</span>
+            <small>一条 Dock，全程不离手</small>
+          </div>
+        </div>
+      </section>
+
+      <section class="statement section-pad reveal">
+        <p class="section-kicker">少一点界面，多一点专注</p>
+        <h2>工具应该在需要时出现，<br />完成后安静退场。</h2>
+        <p>
+          不用在多个窗口间来回跳转。框选完成后，标注、复制、保存、贴图和长截图都在同一条 Dock 上。
+        </p>
+      </section>
+
+      <section class="interfaces section-pad" id="interfaces">
+        <div class="section-heading reveal">
+          <div><p class="section-kicker">当前界面</p><h2>四个场景，一套克制的体验</h2></div>
+          <p>这里展示的是当前项目的真实界面与关键区域，而不是脱离实现的概念图。</p>
+        </div>
+
+        <div class="ui-grid">
+          <figure class="ui-card ui-card-wide reveal">
+            <div class="ui-shot"><img src="./assets/ui-home.png" alt="pic-click 轻量启动面板" /></div>
+            <figcaption><span>01</span><div><b>轻量启动面板</b><small>主要动作只有一个：马上开始截图。</small></div></figcaption>
+          </figure>
+
+          <figure class="ui-card reveal">
+            <div class="ui-shot ui-shot-crop-home"><img src="./assets/ui-home.png" alt="开始截图与录屏的快捷入口" /></div>
+            <figcaption><span>02</span><div><b>截图与录屏入口</b><small>最常用的两个动作并列，快捷键清晰可见。</small></div></figcaption>
+          </figure>
+
+          <figure class="ui-card reveal">
+            <div class="ui-shot ui-shot-editor"><img src="./assets/ui-editor.png" alt="pic-click 单 Dock 编辑器" /></div>
+            <figcaption><span>03</span><div><b>单 Dock 编辑器</b><small>选择、形状、画笔、文字、撤销、保存与贴图集中呈现。</small></div></figcaption>
+          </figure>
+
+          <figure class="ui-card ui-card-wide reveal">
+            <div class="ui-shot ui-shot-crop-dock"><img src="./assets/ui-editor.png" alt="可定制的 pic-click 编辑 Dock 特写" /></div>
+            <figcaption><span>04</span><div><b>可定制工具 Dock</b><small>保留你的高频工具，隐藏不需要的动作。</small></div></figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="features section-pad" id="features">
+        <div class="section-heading reveal">
+          <div><p class="section-kicker">实用能力</p><h2>该有的都有，不该吵的都收好</h2></div>
+          <p>围绕截图后的连续工作流设计，让保存信息和表达想法少一步。</p>
+        </div>
+        <div class="feature-grid">
+          <article class="feature feature-accent reveal"><span>↖</span><h3>区域与长截图</h3><p>快速框选屏幕内容，也能继续拼接滚动页面。</p></article>
+          <article class="feature reveal"><span>●</span><h3>屏幕录制</h3><p>直接录下操作过程并保存为 MJPEG AVI，无需跳转第三方工具。</p></article>
+          <article class="feature reveal"><span>✎</span><h3>完整标注</h3><p>矩形、圆形、箭头、画笔、马赛克、序号和文字集中在 Dock。</p></article>
+          <article class="feature reveal"><span>▣</span><h3>桌面贴图</h3><p>把截图、剪贴板文字或颜色固定在桌面上，随用随看。</p></article>
+          <article class="feature reveal"><span>≡</span><h3>历史记录</h3><p>回到之前的截图继续查看和编辑，减少重复工作。</p></article>
+          <article class="feature reveal"><span>⌘</span><h3>本地与连接</h3><p>默认本地保存，同时提供 WebDAV 与 HTTP API 连接能力。</p></article>
+        </div>
+      </section>
+
+      <section class="workflow section-pad" id="workflow">
+        <div class="workflow-copy reveal">
+          <p class="section-kicker">三步完成</p>
+          <h2>从看见，到分享，<br />不离开当前思路。</h2>
+          <p>默认流程足够短，自定义空间也足够大。</p>
+        </div>
+        <ol class="steps">
+          <li class="reveal"><span>01</span><div><h3>框选或录制</h3><p>按下快捷键，立即捕捉需要的内容。</p></div></li>
+          <li class="reveal"><span>02</span><div><h3>在 Dock 上处理</h3><p>标注重点、打码信息，或将画面钉在桌面。</p></div></li>
+          <li class="reveal"><span>03</span><div><h3>复制、保存、继续</h3><p>带着结果回到原来的任务，不被工具打断。</p></div></li>
+        </ol>
+      </section>
+
+      <section class="shortcut section-pad reveal">
+        <div><p class="section-kicker">快捷启动</p><h2>手不离键盘。</h2></div>
+        <div class="keys"><span><kbd>F1</kbd> 区域截图</span><span><kbd>F3</kbd> 剪贴板贴图</span><span><kbd>⇧ F3</kbd> 显示 / 隐藏贴图</span></div>
+      </section>
+
+      <section class="cta section-pad reveal">
+        <div>
+          <p class="section-kicker">开源 · 本地优先</p>
+          <h2>让截图重新变得简单。</h2>
+          <p>查看源代码、提交建议，或按自己的工作方式继续改造。</p>
+        </div>
+        <a class="button button-light" href="https://github.com/beidouxiaonan/pic-click">前往 GitHub <span>↗</span></a>
+      </section>
+    </main>
+
+    <footer>
+      <a class="brand brand-footer" href="#top"><span class="brand-mark" aria-hidden="true"><i></i></span><span>pic-click</span></a>
+      <p>Capture less. Keep more.</p>
+      <p>© <span id="year">2026</span> pic-click</p>
+    </footer>
+  </body>
+</html>

@@ -2,6 +2,8 @@
 
 `pic-click` 是一个 Windows 本地截图、标注和桌面贴图工具。产品工作流参考 Snipaste，但使用自己的名称、界面和实现，不包含 Snipaste 的商标、图标或源代码。
 
+**[浏览产品宣传页](https://beidouxiaonan.github.io/pic-click/)** · [查看界面设计](https://beidouxiaonan.github.io/pic-click/#interfaces)
+
 ## 直接运行
 
 双击 `Start.bat`，或执行：
